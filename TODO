@@ -1,0 +1,9 @@
+TODO
+----
+
+use sub attributes to declare methods in superclass as inheritable via is_a.
+
+write tests
+
+fix problems
+

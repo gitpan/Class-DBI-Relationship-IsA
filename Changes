@@ -1,0 +1,12 @@
+Revision history for Perl extension Class::PINT.
+
+0.01  Tue Aug  3 22:13:17 2004
+	- original version; created by h2xs 1.23 with options
+		-X Class::PINT
+        - original written by Richard Hundt
+
+0.02  Wed Sep 27 13:30:29 2004
+       - added patch from James O'Sullivan to handle update and accessors
+       - Aaron Trevena tinkered and fixed methods method to support user-named and ucfirst accessors/mutators
+       - added patch from James O'Sullivan to fix searching
+       - fixed inheritable data problem
