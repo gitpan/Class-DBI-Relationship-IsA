@@ -54,7 +54,7 @@ Child class:
  Music::Artist->table('artist');
  Music::Artist->columns(All => qw/artistid alias/);
  Music::Artist->has_many(cds => 'Music::CD');
- Music::Artist->is_a(person => 'Person'); # Music::Artist inherits accessors from Music::Person
+ Music::Artist->is_a(personid => 'Person'); # Music::Artist inherits accessors from Music::Person
 
 ... elsewhere ...
 
@@ -66,7 +66,7 @@ Child class:
 =cut
 
 use strict;
-our $VERSION = '0.03';
+our $VERSION = '0.05';
 
 use warnings;
 use base qw( Class::DBI::Relationship );
@@ -88,7 +88,7 @@ sub remap_arguments {
 	push @f_cols, $f_col
 	    unless $f_col eq $f_class->primary_column;
     }
-    $class->__grouper->add_group(TEMP => map { $_->name } @f_cols);
+    $class->__grouper->add_group(TEMP => map { $_->name } ($class->columns('TEMP'), @f_cols));
     $class->mk_classdata('__isa_rels');
     $class->__isa_rels({ });
     return ($class, $column, $f_class, \%meths);
