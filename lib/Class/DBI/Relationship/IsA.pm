@@ -12,61 +12,70 @@ For more information See Class::DBI and Class::DBI::Relationship.
 
 =head1 SYNOPSIS
 
+# in your database (assuming mysql) #
 
-In your database (assuming mysql):
+create table person (
+  personid int primary key auto_increment,
+  firstname varchar(32),
+  initials varchar(16),
+  surname varchar(64),
+  date_of_birth datetime
+);
 
- create table person (
-   personid int primary key auto_increment,
-   firstname varchar(32),
-   initials varchar(16),
-   surname varchar(64),
-   date_of_birth datetime
- );
+create table artist (
+  artistid int primary key auto_increment,
+  alias varchar(128),
+  person int
+);
 
- create table artist (
-   artistid int primary key auto_increment,
-   alias varchar(128),
-   person int
- );
+# in your classes #
 
+package Music::DBI;
 
-In your classes:
+use base 'Class::DBI';
 
- package Music::DBI;
- use base 'Class::DBI';
+Music::DBI->connection('dbi:mysql:dbname', 'username', 'password');
 
- Music::DBI->connection('dbi:mysql:dbname', 'username', 'password');
+# superclass #
 
-Superclass:
+package Music::Person;
 
- package Music::Person;
- use base 'Music::DBI';
+use base 'Music::DBI';
 
- Music::Artist->table('person');
- Music::Artist->columns(All => qw/personid firstname initials surname date_of_birth/);
+Music::Artist->table('person');
 
-Child class:
+Music::Artist->columns(All => qw/personid firstname initials surname date_of_birth/);
 
- package Music::Artist;
- use base 'Music::DBI';
- use Music::Person; # required for access to Music::Person methods
+# child class #
 
- Music::Artist->table('artist');
- Music::Artist->columns(All => qw/artistid alias/);
- Music::Artist->has_many(cds => 'Music::CD');
- Music::Artist->is_a(person => 'Person'); # Music::Artist inherits accessors from Music::Person
+package Music::Artist;
 
-... elsewhere ...
+use base 'Music::DBI';
 
- use Music::Artist;
- my $artist = Music::Artist->create( {firstname=>'Sarah', surname=>'Geller', alias=>'Buffy'});
- $artist->initials('M');
- $artist->update();
+use Music::Person; # required for access to Music::Person methods
+
+Music::Artist->table('artist');
+
+Music::Artist->columns(All => qw/artistid alias/);
+
+Music::Artist->has_many(cds => 'Music::CD');
+
+Music::Artist->is_a(person => 'Person'); # Music::Artist inherits accessors from Music::Person
+
+# ... elsewhere .. #
+
+use Music::Artist;
+
+my $artist = Music::Artist->create( {firstname=>'Sarah', surname=>'Geller', alias=>'Buffy'});
+
+$artist->initials('M');
+
+$artist->update();
 
 =cut
 
 use strict;
-our $VERSION = '0.03';
+our $VERSION = '0.02';
 
 use warnings;
 use base qw( Class::DBI::Relationship );
@@ -77,6 +86,7 @@ use Data::Dumper;
 sub remap_arguments {
     my $proto = shift;
     my $class = shift;
+
     $class->_invalid_object_method('is_a()') if ref $class;
     my $column = $class->find_column(+shift)
 	or return $class->_croak("is_a needs a valid column");
@@ -89,8 +99,6 @@ sub remap_arguments {
 	    unless $f_col eq $f_class->primary_column;
     }
     $class->__grouper->add_group(TEMP => map { $_->name } @f_cols);
-    $class->mk_classdata('__isa_rels');
-    $class->__isa_rels({ });
     return ($class, $column, $f_class, \%meths);
 }
 
@@ -302,6 +310,7 @@ sub _get_methods {
  MODE: {
 	if ($mode eq 'rw') {
 	    $method = sub {
+		warn "methods $f_col called\n";
 		my ($self, @args) = @_;
 		if(@args) {
 		    $self->$acc_name->$f_col(@args);
@@ -348,7 +357,7 @@ Class::DBI::Relationship
 
 =head1 AUTHOR
 
-Richard Hundt, E<lt>richard@webtk.org.ukE<gt>
+Richard Hundt, E<lt>richard@webtk.orgE<gt>
 
 =head1 COPYRIGHT
 
