@@ -31,5 +31,5 @@ foreach my $address (Address->search(City=>'Watford')) {
 	 $address->County,
 	 $address->City
 	 ), "\n";
-	 
+    warn Dumper(_data_hash=>$address->_data_hash);
 }

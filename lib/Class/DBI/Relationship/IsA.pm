@@ -12,70 +12,61 @@ For more information See Class::DBI and Class::DBI::Relationship.
 
 =head1 SYNOPSIS
 
-# in your database (assuming mysql) #
 
-create table person (
-  personid int primary key auto_increment,
-  firstname varchar(32),
-  initials varchar(16),
-  surname varchar(64),
-  date_of_birth datetime
-);
+In your database (assuming mysql):
 
-create table artist (
-  artistid int primary key auto_increment,
-  alias varchar(128),
-  person int
-);
+ create table person (
+   personid int primary key auto_increment,
+   firstname varchar(32),
+   initials varchar(16),
+   surname varchar(64),
+   date_of_birth datetime
+ );
 
-# in your classes #
+ create table artist (
+   artistid int primary key auto_increment,
+   alias varchar(128),
+   person int
+ );
 
-package Music::DBI;
 
-use base 'Class::DBI';
+In your classes:
 
-Music::DBI->connection('dbi:mysql:dbname', 'username', 'password');
+ package Music::DBI;
+ use base 'Class::DBI';
 
-# superclass #
+ Music::DBI->connection('dbi:mysql:dbname', 'username', 'password');
 
-package Music::Person;
+Superclass:
 
-use base 'Music::DBI';
+ package Music::Person;
+ use base 'Music::DBI';
 
-Music::Artist->table('person');
+ Music::Artist->table('person');
+ Music::Artist->columns(All => qw/personid firstname initials surname date_of_birth/);
 
-Music::Artist->columns(All => qw/personid firstname initials surname date_of_birth/);
+Child class:
 
-# child class #
+ package Music::Artist;
+ use base 'Music::DBI';
+ use Music::Person; # required for access to Music::Person methods
 
-package Music::Artist;
+ Music::Artist->table('artist');
+ Music::Artist->columns(All => qw/artistid alias/);
+ Music::Artist->has_many(cds => 'Music::CD');
+ Music::Artist->is_a(person => 'Person'); # Music::Artist inherits accessors from Music::Person
 
-use base 'Music::DBI';
+... elsewhere ...
 
-use Music::Person; # required for access to Music::Person methods
-
-Music::Artist->table('artist');
-
-Music::Artist->columns(All => qw/artistid alias/);
-
-Music::Artist->has_many(cds => 'Music::CD');
-
-Music::Artist->is_a(person => 'Person'); # Music::Artist inherits accessors from Music::Person
-
-# ... elsewhere .. #
-
-use Music::Artist;
-
-my $artist = Music::Artist->create( {firstname=>'Sarah', surname=>'Geller', alias=>'Buffy'});
-
-$artist->initials('M');
-
-$artist->update();
+ use Music::Artist;
+ my $artist = Music::Artist->create( {firstname=>'Sarah', surname=>'Geller', alias=>'Buffy'});
+ $artist->initials('M');
+ $artist->update();
 
 =cut
 
 use strict;
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use warnings;
 use base qw( Class::DBI::Relationship );
