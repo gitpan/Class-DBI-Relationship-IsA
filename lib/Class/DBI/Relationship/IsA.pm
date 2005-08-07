@@ -6,12 +6,15 @@ Class::DBI::Relationship::IsA - A Class::DBI module for 'Is A' relationships
 
 =head1 DESCRIPTION
 
-Class::DBI::Relationship::IsA Provides an Is A relationship between Class::DBI classes.
-This should DTRT when you specify an IsA relationship between classes transparently.
-For more information See Class::DBI and Class::DBI::Relationship.
+Class::DBI::Relationship::IsA Provides an Is A relationship between Class::DBI classes/tables.
+
+By using this module you can emulate some features of inheritance both within your database and classes through the Class::DBI API.
+
+NOTE: This module is still experimental, several very nasty bugs have been found (and fixed) others may still be lurking - see CAVEATS AND BUGS below.
+
+Warning Will Robinson!
 
 =head1 SYNOPSIS
-
 
 In your database (assuming mysql):
 
@@ -36,14 +39,16 @@ In your classes:
  use base 'Class::DBI';
 
  Music::DBI->connection('dbi:mysql:dbname', 'username', 'password');
+ __PACKAGE__->add_relationship_type(is_a => 'Class::DBI::Relationship::IsA');
 
 Superclass:
 
  package Music::Person;
  use base 'Music::DBI';
 
- Music::Artist->table('person');
- Music::Artist->columns(All => qw/personid firstname initials surname date_of_birth/);
+ Music::Person->table('person');
+ Music::Person->columns(All => qw/personid firstname initials surname date_of_birth/);
+ Music::Person->columns(Primary => qw/personid/); # Good practice, less likely to break IsA
 
 Child class:
 
@@ -53,8 +58,9 @@ Child class:
 
  Music::Artist->table('artist');
  Music::Artist->columns(All => qw/artistid alias/);
+ Music::Person->columns(Primary => qw/personid/); # Good practice, less likely to break IsA
  Music::Artist->has_many(cds => 'Music::CD');
- Music::Artist->is_a(personid => 'Person'); # Music::Artist inherits accessors from Music::Person
+ Music::Artist->is_a(person => 'Person'); # Music::Artist inherits accessors from Music::Person
 
 ... elsewhere ...
 
@@ -70,7 +76,7 @@ our $VERSION = '0.05';
 
 use warnings;
 use base qw( Class::DBI::Relationship );
-
+use Class::DBI::AbstractSearch;
 
 use Data::Dumper;
 
@@ -78,7 +84,7 @@ sub remap_arguments {
     my $proto = shift;
     my $class = shift;
     $class->_invalid_object_method('is_a()') if ref $class;
-    my $column = $class->find_column(+shift)
+    my $column = $class->find_column(shift)
 	or return $class->_croak("is_a needs a valid column");
     my $f_class = shift
 	or $class->_croak("$class $column needs an associated class");
@@ -88,7 +94,8 @@ sub remap_arguments {
 	push @f_cols, $f_col
 	    unless $f_col eq $f_class->primary_column;
     }
-    $class->__grouper->add_group(TEMP => map { $_->name } ($class->columns('TEMP'), @f_cols));
+    $class->__grouper->add_group(TEMP => map { $_->name } @f_cols);
+    $class->__grouper->add_group(__INHERITED => map { $_->name } @f_cols);
     $class->mk_classdata('__isa_rels');
     $class->__isa_rels({ });
     return ($class, $column, $f_class, \%meths);
@@ -112,12 +119,24 @@ sub methods {
     my $self = shift;
     $self->class->_require_class($self->foreign_class);
 
+    my $foreign_class = $self->foreign_class;
     my $class = $self->class;
+    warn "foreign class : $foreign_class\n";
+
+    warn "getting relationships..\n";
+
+
+    my $parent_relation_fields = $self->_inject_inherited_relationships(class=>$class, foreign=>$foreign_class);
+
+    my $forbidden_fields = "(id|${class}_?u?id";
+    $forbidden_fields .= ($foreign_class->columns('Primary')) ? '|' . $foreign_class->columns('Primary') .')' : ')' ;
+    warn "forbidden_fields : $forbidden_fields\n";
 
     my %methods;
     my $acc_name = $self->accessor->name;
     foreach my $f_col ($self->foreign_class->all_columns) {
-        next if $f_col eq $acc_name;
+        warn "f_col : $f_col, acc_name : $acc_name\n";
+        next if ($f_col eq $acc_name or $f_col =~ /$forbidden_fields/i or $parent_relation_fields->{$f_col});
 	if ($class->can('pure_accessor_name')) {
 	    # provide seperate read/write accessor, read only accessor and write only mutator
 	    $methods{ucfirst($class->pure_accessor_name($f_col))}
@@ -238,6 +257,60 @@ sub all_columns {
     };
 }
 
+
+################################################################################
+
+sub _inject_inherited_relationships {
+  my ($self,%params) = @_;
+  my $class = $params{class};
+  my $foreign_class = $params{foreign};
+  my $fields = {};
+
+  my %current_relationships = ();
+
+  if ($class->can('meta_info')) {
+    warn "class has meta_info ";
+    # warn Dumper($class->meta_info);
+    my $meta_info = $class->meta_info;
+    foreach my $relation_type ( keys %$meta_info ) {
+      next if ($relation_type eq 'is_a');
+      foreach my $relname (keys %{$meta_info->{$relation_type}}) {
+	$current_relationships{$relname} = 1;
+      }
+    }
+  }
+
+  if ($foreign_class->can('meta_info')) {
+    warn "foreign class has meta_info ";
+    # warn Dumper($class->meta_info);
+    my $meta_info = $foreign_class->meta_info;
+    foreach my $relation_type ( keys %$meta_info ) {
+      next if ($relation_type eq 'is_a');
+      foreach my $relname (keys %{$meta_info->{$relation_type}}) {
+	warn "adding new relationship : $relname \n";
+	$fields->{$relname} = 1;
+	$self->_inject_inherited_method($class, $relname);
+      }
+    }
+  }
+  return $fields;
+}
+
+sub _inject_inherited_method {
+  my ($self,$class,$accessor_name) = @_;
+  my $parent_accessor = $self->accessor;
+  my $method = sub {
+    warn "injected method $accessor_name , calling $accessor_name on parent via $parent_accessor \n";
+    warn "..called with args ", join(', ',@_), "\n";
+    my ($self, @args) = @_;
+    $self->$parent_accessor->$accessor_name(@args);
+  };
+  {
+    no strict "refs";
+    *{"${class}::${accessor_name}"} = $method;
+  }
+}
+
 sub _creator {
     my $proto = shift;
     my $col = $proto->accessor;
@@ -253,11 +326,15 @@ sub _creator {
 	    next unless defined($self->_attrs($_));
 	    $hash->{$_} = $self->_attrs($_);
 	}
+	my $f_pk = $f_class->primary_column;
+	if ($self->_attrs($f_pk)) {
+	  $hash->{$f_pk} = $self->_attrs($f_pk);
+	}
 
 	my $f_obj = $f_class->create($hash);
 	$proto->_import_column_values($self, $f_class, $f_obj);
 
-	return $self->_attribute_store($col => $f_obj);
+	return $self->_attribute_store($col => $f_obj->id);
     };
 }
 
@@ -298,17 +375,19 @@ sub _set_up_class_data {
 
 sub _get_methods {
     my ($self, $acc_name, $f_col, $mode) = @_;
+    warn "_get_methods $acc_name, $f_col, $mode \n";
+    warn join(', ',caller());
     my $method;
  MODE: {
 	if ($mode eq 'rw') {
 	    $method = sub {
+	      warn "artificial method $acc_name/$f_col called with args ", join(', ',@_), "\n";
 		my ($self, @args) = @_;
 		if(@args) {
-		    $self->$acc_name->$f_col(@args);
-		    return;
-		}
-		else {
-		    return $self->$acc_name->$f_col;
+		  $self->$acc_name->$f_col(@args);
+		  return;
+		} else {
+		  return $self->$acc_name->$f_col;
 		}
 	    };
 	    last MODE;
@@ -338,17 +417,40 @@ sub _get_methods {
 
 ################################################################################
 
+=head1 BUGS AND CAVEATS
+
+* Multiple inheritance is not supported, this is unlikely to change for the forseable future
+
+* is_a must be called after all other cdbi relationship methods otherwise inherited methods and 
+accessors may be over-ridden or clash unexpectedly
+
+* non Class::DBI attributes and methods are not inherited via this module
+
+* The update method is called on the inherited object when the inhertiting object has update called
+
+* Always specify the primary key using columns(Primary => qw/../) if you don't bad things could happen, think of the movies 'Tremors', 'Poltergeist' and 'Evil Dead' all rolled into one but without any heros.
+
+* Very Bad Things can and may occur when using this module even if you use good practice and are cautious -- this includes but is not limited to infinite loops, memory leaks and data corruption.
+
+=head1 DEPENDANCIES
+
+L<Class::DBI::AbstractSearch>
+
 =head1 SEE ALSO
 
 L<perl>
 
-Class::DBI
+L<Class::DBI>
 
-Class::DBI::Relationship
+L<Class::DBI::Relationship>
 
 =head1 AUTHOR
 
 Richard Hundt, E<lt>richard@webtk.org.ukE<gt>
+
+=head1 MAINTAINER
+
+Aaron Trevena E<lt>aaron.trevena@droogs.orgE<gt>
 
 =head1 COPYRIGHT
 
